@@ -33,6 +33,8 @@ class UserLocation(models.Model):
     latitude = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
     accuracy = models.FloatField(null=True, blank=True)
+    is_sharing_live = models.BooleanField(default=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

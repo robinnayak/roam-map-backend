@@ -212,14 +212,27 @@ DJOSER = {
 }
 
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/0')],
+REDIS_URL = os.environ.get('REDIS_URL')
+USE_REDIS_CHANNEL_LAYER = parse_bool(
+    os.environ.get('USE_REDIS_CHANNEL_LAYER'),
+    default=bool(REDIS_URL),
+)
+
+if USE_REDIS_CHANNEL_LAYER:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [REDIS_URL or 'redis://127.0.0.1:6379/0'],
+            },
         },
-    },
-}
+    }
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        },
+    }
 
 
 CSRF_TRUSTED_ORIGINS = list(

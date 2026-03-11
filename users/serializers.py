@@ -18,10 +18,41 @@ class UserSerializer(DjoserUserSerializer):
 
 
 class UserLocationSerializer(serializers.ModelSerializer):
+    latitude = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+    )
+    longitude = serializers.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        required=False,
+    )
+    is_sharing_live = serializers.BooleanField(required=False, default=True)
+
     class Meta:
         model = UserLocation
-        fields = ('latitude', 'longitude', 'accuracy', 'updated_at')
-        read_only_fields = ('updated_at',)
+        fields = (
+            'latitude',
+            'longitude',
+            'accuracy',
+            'is_sharing_live',
+            'stopped_at',
+            'updated_at',
+        )
+        read_only_fields = ('stopped_at', 'updated_at')
+
+    def validate(self, attrs):
+        is_sharing_live = attrs.get('is_sharing_live', True)
+        latitude = attrs.get('latitude')
+        longitude = attrs.get('longitude')
+
+        if is_sharing_live and (latitude is None or longitude is None):
+            raise serializers.ValidationError(
+                'Latitude and longitude are required while live sharing is active.'
+            )
+
+        return attrs
 
 
 class GroupUserLocationSerializer(serializers.ModelSerializer):
@@ -40,5 +71,7 @@ class GroupUserLocationSerializer(serializers.ModelSerializer):
             'latitude',
             'longitude',
             'accuracy',
+            'is_sharing_live',
+            'stopped_at',
             'updated_at',
         )

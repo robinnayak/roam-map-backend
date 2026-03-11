@@ -38,6 +38,8 @@ class GroupLocationConsumer(AsyncJsonWebsocketConsumer):
             "latitude": content.get("latitude"),
             "longitude": content.get("longitude"),
             "accuracy": content.get("accuracy"),
+            "is_sharing_live": content.get("is_sharing_live", True),
+            "stopped_at": content.get("stopped_at"),
             "updated_at": content.get("updated_at"),
         }
 
@@ -55,4 +57,3 @@ class GroupLocationConsumer(AsyncJsonWebsocketConsumer):
     @database_sync_to_async
     def _is_group_member(self, user_id, group_id):
         return GroupMembership.objects.filter(group_id=group_id, user_id=user_id).exists()
-

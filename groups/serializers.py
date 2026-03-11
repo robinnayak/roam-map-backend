@@ -46,6 +46,8 @@ class GroupMemberSerializer(serializers.ModelSerializer):
             'latitude': location.latitude,
             'longitude': location.longitude,
             'accuracy': location.accuracy,
+            'is_sharing_live': location.is_sharing_live,
+            'stopped_at': location.stopped_at,
             'updated_at': location.updated_at,
         }
 
