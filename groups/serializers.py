@@ -8,8 +8,23 @@ class GroupSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Group
-        fields = ('id', 'name', 'invite_code', 'created_by', 'created_at')
-        read_only_fields = ('id', 'invite_code', 'created_by', 'created_at')
+        fields = (
+            'id',
+            'name',
+            'invite_code',
+            'created_by',
+            'is_active',
+            'expires_at',
+            'created_at',
+        )
+        read_only_fields = (
+            'id',
+            'invite_code',
+            'created_by',
+            'is_active',
+            'expires_at',
+            'created_at',
+        )
 
 
 class CreateGroupSerializer(serializers.Serializer):
@@ -39,6 +54,10 @@ class GroupMemberSerializer(serializers.ModelSerializer):
         )
 
     def get_location(self, obj):
+        connected_user_ids = self.context.get('connected_user_ids', set())
+        if obj.user_id not in connected_user_ids:
+            return None
+
         location = getattr(obj.user, 'location', None)
         if location is None:
             return None

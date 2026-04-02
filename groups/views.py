@@ -12,6 +12,7 @@ from .serializers import (
     JoinGroupSerializer,
     WaypointSerializer,
 )
+from users.models import get_connected_user_ids
 
 
 class CreateGroupView(APIView):
@@ -20,6 +21,16 @@ class CreateGroupView(APIView):
     def post(self, request):
         serializer = CreateGroupSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        active_group_count = Group.objects.filter(
+            created_by=request.user,
+            is_active=True,
+        ).count()
+        if active_group_count >= 3:
+            return Response(
+                {'detail': 'You can only create up to 3 active groups at a time.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         with transaction.atomic():
             group = Group.objects.create(
@@ -82,7 +93,11 @@ class GroupMembersView(APIView):
             .select_related('user', 'user__location')
             .order_by('joined_at')
         )
-        members_data = GroupMemberSerializer(memberships, many=True).data
+        members_data = GroupMemberSerializer(
+            memberships,
+            many=True,
+            context={'connected_user_ids': get_connected_user_ids(request.user.id)},
+        ).data
         return Response(
             {
                 'group': GroupSerializer(group).data,

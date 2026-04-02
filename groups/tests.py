@@ -2,11 +2,13 @@ from asgiref.sync import async_to_sync
 from unittest.mock import AsyncMock
 
 from django.test import TransactionTestCase, override_settings
+from rest_framework import status
+from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from groups.consumers import GroupLocationConsumer
 from groups.models import Group, GroupMembership
-from users.models import User
+from users.models import User, UserLocation
 
 
 TEST_CHANNEL_LAYERS = {
@@ -14,6 +16,65 @@ TEST_CHANNEL_LAYERS = {
         "BACKEND": "channels.layers.InMemoryChannelLayer",
     }
 }
+
+
+class GroupApiTests(APITestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email="creator@example.com",
+            password="password123",
+            first_name="Creator",
+        )
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.user).access_token)}"
+        )
+
+    def test_group_creator_cannot_exceed_three_active_groups(self):
+        for index in range(3):
+            group = Group.objects.create(
+                name=f"Group {index + 1}",
+                created_by=self.user,
+                is_active=True,
+            )
+            GroupMembership.objects.create(group=group, user=self.user)
+
+        response = self.client.post(
+            "/api/v1/groups/",
+            {"name": "Group 4"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["detail"],
+            "You can only create up to 3 active groups at a time.",
+        )
+
+    def test_group_members_hide_location_until_users_are_connected(self):
+        other_user = User.objects.create_user(
+            email="friend@example.com",
+            password="password123",
+            first_name="Friend",
+        )
+        group = Group.objects.create(name="Trail Team", created_by=self.user)
+        GroupMembership.objects.create(group=group, user=self.user)
+        GroupMembership.objects.create(group=group, user=other_user)
+        UserLocation.objects.create(
+            user=other_user,
+            latitude=27.643,
+            longitude=85.4731,
+            accuracy=4,
+            is_sharing_live=True,
+        )
+
+        response = self.client.get(f"/api/v1/groups/{group.id}/members/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        friend_member = next(
+            member for member in response.data["members"] if member["user_id"] == other_user.id
+        )
+        self.assertIsNone(friend_member["location"])
 
 
 @override_settings(CHANNEL_LAYERS=TEST_CHANNEL_LAYERS)

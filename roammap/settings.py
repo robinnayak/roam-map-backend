@@ -79,6 +79,7 @@ INSTALLED_APPS = [
     'djoser',
     'corsheaders',
     'channels',
+    'chat',
     'users',
     'groups',
     'routes',

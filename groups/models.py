@@ -21,6 +21,8 @@ class Group(models.Model):
         on_delete=models.CASCADE,
         related_name='created_groups',
     )
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
