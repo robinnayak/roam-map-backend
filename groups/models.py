@@ -30,6 +30,10 @@ class Group(models.Model):
 
 
 class GroupMembership(models.Model):
+    class Role(models.TextChoices):
+        OWNER = 'owner', 'Owner'
+        MEMBER = 'member', 'Member'
+
     group = models.ForeignKey(
         Group,
         on_delete=models.CASCADE,
@@ -39,6 +43,11 @@ class GroupMembership(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='group_memberships',
+    )
+    role = models.CharField(
+        max_length=16,
+        choices=Role.choices,
+        default=Role.MEMBER,
     )
     joined_at = models.DateTimeField(auto_now_add=True)
 
@@ -52,7 +61,7 @@ class GroupMembership(models.Model):
         ]
 
     def __str__(self):
-        return f'{self.user_id} in {self.group_id}'
+        return f'{self.user_id} in {self.group_id} ({self.role})'
 
 
 class Waypoint(models.Model):

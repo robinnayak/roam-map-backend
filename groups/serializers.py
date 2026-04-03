@@ -5,6 +5,8 @@ from .models import Group, GroupMembership, Waypoint
 
 class GroupSerializer(serializers.ModelSerializer):
     created_by = serializers.IntegerField(source='created_by_id', read_only=True)
+    user_role = serializers.SerializerMethodField()
+    member_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Group
@@ -13,6 +15,8 @@ class GroupSerializer(serializers.ModelSerializer):
             'name',
             'invite_code',
             'created_by',
+            'user_role',
+            'member_count',
             'is_active',
             'expires_at',
             'created_at',
@@ -21,10 +25,41 @@ class GroupSerializer(serializers.ModelSerializer):
             'id',
             'invite_code',
             'created_by',
+            'user_role',
+            'member_count',
             'is_active',
             'expires_at',
             'created_at',
         )
+
+    def get_user_role(self, obj):
+        user = self.context.get('user')
+        if user is None or not getattr(user, 'is_authenticated', False):
+            return None
+
+        memberships = getattr(obj, 'prefetched_memberships', None)
+        if memberships is not None:
+            for membership in memberships:
+                if membership.user_id == user.id:
+                    return membership.role
+            return 'owner' if obj.created_by_id == user.id else None
+
+        membership = (
+            obj.memberships.filter(user_id=user.id)
+            .only('role')
+            .first()
+        )
+        if membership is not None:
+            return membership.role
+        if obj.created_by_id == user.id:
+            return GroupMembership.Role.OWNER
+        return None
+
+    def get_member_count(self, obj):
+        member_count = getattr(obj, 'member_count', None)
+        if member_count is not None:
+            return member_count
+        return obj.memberships.count()
 
 
 class CreateGroupSerializer(serializers.Serializer):
@@ -41,6 +76,7 @@ class GroupMemberSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(source='user.first_name', read_only=True)
     last_name = serializers.CharField(source='user.last_name', read_only=True)
     location = serializers.SerializerMethodField()
+    role = serializers.CharField(read_only=True)
 
     class Meta:
         model = GroupMembership
@@ -49,6 +85,7 @@ class GroupMemberSerializer(serializers.ModelSerializer):
             'email',
             'first_name',
             'last_name',
+            'role',
             'joined_at',
             'location',
         )
