@@ -17,15 +17,18 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
-from roammap.views import health_check
+from roammap.views import health_check, home
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/v1/auth/', include('djoser.urls')),
     path('api/v1/auth/', include('djoser.urls.jwt')),
+    path('api/v1/connections/', include('users.connection_urls')),
+    path('api/v1/messages/', include('chat.urls')),
     path('api/v1/users/', include('users.urls')),
     path('api/v1/groups/', include('groups.urls')),
     path('api/v1/routes/', include('routes.urls')),
     path('api/v1/emergency/', include('emergency.urls')),
     path('api/v1/health/', health_check),
+    path('', home),
 ]

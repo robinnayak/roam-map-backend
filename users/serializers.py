@@ -2,7 +2,7 @@ from djoser.serializers import UserCreateSerializer as DjoserUserCreateSerialize
 from djoser.serializers import UserSerializer as DjoserUserSerializer
 from rest_framework import serializers
 
-from .models import User, UserLocation
+from .models import User, UserConnection, UserLocation
 
 
 class UserCreateSerializer(DjoserUserCreateSerializer):
@@ -75,3 +75,34 @@ class GroupUserLocationSerializer(serializers.ModelSerializer):
             'stopped_at',
             'updated_at',
         )
+
+
+class ConnectionRequestSerializer(serializers.Serializer):
+    to_user_id = serializers.IntegerField()
+
+
+class ConnectionActorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'email', 'first_name', 'last_name')
+
+
+class UserConnectionSerializer(serializers.ModelSerializer):
+    user = serializers.SerializerMethodField()
+
+    class Meta:
+        model = UserConnection
+        fields = ('id', 'status', 'created_at', 'user')
+
+    def get_user(self, obj):
+        request = self.context['request']
+        other_user = obj.to_user if obj.from_user_id == request.user.id else obj.from_user
+        return ConnectionActorSerializer(other_user).data
+
+
+class PendingConnectionSerializer(serializers.ModelSerializer):
+    from_user = ConnectionActorSerializer(read_only=True)
+
+    class Meta:
+        model = UserConnection
+        fields = ('id', 'status', 'created_at', 'from_user')
