@@ -87,3 +87,51 @@ class Waypoint(models.Model):
 
     def __str__(self):
         return f'{self.label} ({self.group_id})'
+
+
+class GroupPlannerTask(models.Model):
+    class Status(models.TextChoices):
+        TODO = 'todo', 'To Do'
+        IN_PROGRESS = 'in_progress', 'In Progress'
+        DONE = 'done', 'Done'
+
+    group = models.ForeignKey(
+        Group,
+        on_delete=models.CASCADE,
+        related_name='planner_tasks',
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='created_group_planner_tasks',
+    )
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_group_planner_tasks',
+    )
+    title = models.CharField(max_length=255)
+    category = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=24,
+        choices=Status.choices,
+        default=Status.TODO,
+    )
+    due_date = models.DateField(null=True, blank=True)
+    note = models.TextField(blank=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['category', 'sort_order', 'created_at', 'id']
+        indexes = [
+            models.Index(fields=['group', 'category', 'sort_order', 'created_at']),
+            models.Index(fields=['group', 'status']),
+            models.Index(fields=['group', 'assigned_to']),
+        ]
+
+    def __str__(self):
+        return f'{self.title} ({self.group_id})'

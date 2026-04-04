@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Group, GroupMembership, Waypoint
+from .models import Group, GroupMembership, GroupPlannerTask, Waypoint
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -131,3 +131,57 @@ class WaypointSerializer(serializers.ModelSerializer):
             'longitude',
             'created_at',
         )
+
+
+class PlannerTaskUserSerializer(serializers.Serializer):
+    id = serializers.IntegerField(read_only=True)
+    first_name = serializers.CharField(read_only=True)
+    last_name = serializers.CharField(read_only=True)
+    email = serializers.EmailField(read_only=True)
+
+
+class GroupPlannerTaskSerializer(serializers.ModelSerializer):
+    group = serializers.IntegerField(source='group_id', read_only=True)
+    created_by = PlannerTaskUserSerializer(read_only=True)
+    assigned_to = PlannerTaskUserSerializer(read_only=True)
+
+    class Meta:
+        model = GroupPlannerTask
+        fields = (
+            'id',
+            'group',
+            'title',
+            'category',
+            'status',
+            'assigned_to',
+            'due_date',
+            'note',
+            'created_by',
+            'sort_order',
+            'created_at',
+            'updated_at',
+        )
+
+
+class PlannerTaskCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    category = serializers.CharField(max_length=64)
+    due_date = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    sort_order = serializers.IntegerField(required=False, min_value=0)
+
+
+class PlannerTaskUpdateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255, required=False)
+    category = serializers.CharField(max_length=64, required=False)
+    due_date = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    sort_order = serializers.IntegerField(required=False, min_value=0)
+
+
+class PlannerTaskAssignSerializer(serializers.Serializer):
+    assigned_to_user_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+class PlannerTaskStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=GroupPlannerTask.Status.choices)

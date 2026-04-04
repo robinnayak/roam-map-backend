@@ -4,13 +4,19 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Group, GroupMembership
+from .models import Group, GroupMembership, GroupPlannerTask
+from .permissions import is_group_member
 from .serializers import (
     CreateGroupSerializer,
     CreateWaypointSerializer,
+    GroupPlannerTaskSerializer,
     GroupMemberSerializer,
     GroupSerializer,
     JoinGroupSerializer,
+    PlannerTaskAssignSerializer,
+    PlannerTaskCreateSerializer,
+    PlannerTaskStatusSerializer,
+    PlannerTaskUpdateSerializer,
     WaypointSerializer,
 )
 from users.models import get_connected_user_ids
@@ -100,6 +106,68 @@ def user_is_group_owner(group: Group, user) -> bool:
         user=user,
         role=GroupMembership.Role.OWNER,
     ).exists()
+
+
+def get_planner_group_for_user(group_id: int, user):
+    group = (
+        Group.objects.filter(id=group_id)
+        .annotate(member_count=Count('memberships', distinct=True))
+        .prefetch_related(
+            Prefetch(
+                'memberships',
+                queryset=GroupMembership.objects.filter(user=user).only(
+                    'group_id',
+                    'user_id',
+                    'role',
+                ),
+                to_attr='prefetched_memberships',
+            )
+        )
+        .first()
+    )
+    if group is None:
+        return None
+
+    if not is_group_member(user, group_id):
+        return None
+
+    ensure_owner_membership(group)
+    return group
+
+
+def get_planner_task_for_group(group: Group, task_id: int):
+    return (
+        GroupPlannerTask.objects.filter(group=group, id=task_id)
+        .select_related('created_by', 'assigned_to')
+        .first()
+    )
+
+
+def serialize_planner_tasks(group: Group):
+    tasks = list(
+        group.planner_tasks.select_related('created_by', 'assigned_to').order_by(
+            'category',
+            'sort_order',
+            'created_at',
+            'id',
+        )
+    )
+    grouped = []
+    seen_categories = []
+    for task in tasks:
+        if task.category not in seen_categories:
+            seen_categories.append(task.category)
+
+    for category in seen_categories:
+        category_tasks = [task for task in tasks if task.category == category]
+        grouped.append(
+            {
+                'category': category,
+                'tasks': GroupPlannerTaskSerializer(category_tasks, many=True).data,
+            }
+        )
+
+    return grouped
 
 
 class GroupListCreateView(APIView):
@@ -323,3 +391,209 @@ class WaypointView(APIView):
             **serializer.validated_data,
         )
         return Response(WaypointSerializer(waypoint).data, status=status.HTTP_201_CREATED)
+
+
+class GroupPlannerListCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, group_id):
+        group = get_planner_group_for_user(group_id, request.user)
+        if group is None:
+            return Response(
+                {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        return Response(
+            {
+                'group': GroupSerializer(group, context={'user': request.user}).data,
+                'categories': serialize_planner_tasks(group),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def post(self, request, group_id):
+        group = get_planner_group_for_user(group_id, request.user)
+        if group is None:
+            return Response(
+                {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = PlannerTaskCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        task = group.planner_tasks.create(
+            created_by=request.user,
+            title=serializer.validated_data['title'],
+            category=serializer.validated_data['category'],
+            due_date=serializer.validated_data.get('due_date'),
+            note=serializer.validated_data.get('note') or '',
+            sort_order=serializer.validated_data.get('sort_order', 0),
+        )
+        task = get_planner_task_for_group(group, task.id)
+        return Response(GroupPlannerTaskSerializer(task).data, status=status.HTTP_201_CREATED)
+
+
+class GroupPlannerTaskDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, group_id, task_id):
+        group = get_planner_group_for_user(group_id, request.user)
+        if group is None:
+            return Response(
+                {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        task = get_planner_task_for_group(group, task_id)
+        if task is None:
+            return Response(
+                {'detail': 'Planner task not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        is_owner = user_is_group_owner(group, request.user)
+        is_creator = task.created_by_id == request.user.id
+        if not is_owner and not is_creator:
+            return Response(
+                {'detail': 'Only the task creator or trip owner can edit this task.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = PlannerTaskUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        for field, value in serializer.validated_data.items():
+            setattr(task, field, '' if field == 'note' and value is None else value)
+        task.save()
+        return Response(GroupPlannerTaskSerializer(task).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, group_id, task_id):
+        group = get_planner_group_for_user(group_id, request.user)
+        if group is None:
+            return Response(
+                {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        task = get_planner_task_for_group(group, task_id)
+        if task is None:
+            return Response(
+                {'detail': 'Planner task not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        is_owner = user_is_group_owner(group, request.user)
+        if not is_owner:
+            if task.created_by_id != request.user.id:
+                return Response(
+                    {'detail': 'Only the task creator or trip owner can delete this task.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if task.status != GroupPlannerTask.Status.TODO:
+                return Response(
+                    {
+                        'detail': (
+                            'Members can delete only their own tasks that are still in todo.'
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        task.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class GroupPlannerTaskAssignView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, group_id, task_id):
+        group = get_planner_group_for_user(group_id, request.user)
+        if group is None:
+            return Response(
+                {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        task = get_planner_task_for_group(group, task_id)
+        if task is None:
+            return Response(
+                {'detail': 'Planner task not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = PlannerTaskAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        assigned_to_user_id = serializer.validated_data.get('assigned_to_user_id')
+
+        is_owner = user_is_group_owner(group, request.user)
+        if is_owner:
+            if assigned_to_user_id is None:
+                task.assigned_to = None
+            else:
+                membership = group.memberships.filter(user_id=assigned_to_user_id).first()
+                if membership is None:
+                    return Response(
+                        {'detail': 'Assigned user must be a member of this group.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                task.assigned_to_id = assigned_to_user_id
+            task.save(update_fields=['assigned_to', 'updated_at'])
+            task = get_planner_task_for_group(group, task.id)
+            return Response(GroupPlannerTaskSerializer(task).data, status=status.HTTP_200_OK)
+
+        if assigned_to_user_id != request.user.id:
+            return Response(
+                {'detail': 'Members can only assign an unassigned task to themselves.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if task.assigned_to_id is not None:
+            return Response(
+                {'detail': 'Members cannot reassign tasks that already have an assignee.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        task.assigned_to = request.user
+        task.save(update_fields=['assigned_to', 'updated_at'])
+        task = get_planner_task_for_group(group, task.id)
+        return Response(GroupPlannerTaskSerializer(task).data, status=status.HTTP_200_OK)
+
+
+class GroupPlannerTaskStatusView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, group_id, task_id):
+        group = get_planner_group_for_user(group_id, request.user)
+        if group is None:
+            return Response(
+                {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        task = get_planner_task_for_group(group, task_id)
+        if task is None:
+            return Response(
+                {'detail': 'Planner task not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = PlannerTaskStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        is_owner = user_is_group_owner(group, request.user)
+        if not is_owner:
+            if task.assigned_to_id is None:
+                return Response(
+                    {'detail': 'Only the trip owner can update the status of an unassigned task.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if task.assigned_to_id != request.user.id:
+                return Response(
+                    {'detail': 'Members can only update status for tasks assigned to them.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        task.status = serializer.validated_data['status']
+        task.save(update_fields=['status', 'updated_at'])
+        return Response(GroupPlannerTaskSerializer(task).data, status=status.HTTP_200_OK)
