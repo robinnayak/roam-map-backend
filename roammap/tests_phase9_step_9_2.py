@@ -190,3 +190,109 @@ class BackendRegressionSmokeTests(APITestCase):
 
         members = self.client.get(f"/api/v1/groups/{group.id}/members/")
         self.assertEqual(members.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_sos_list_returns_multiple_active_alerts_for_group_members(self):
+        owner = self._create_user("sos-owner@example.com")
+        teammate = self._create_user("sos-teammate@example.com")
+        outsider = self._create_user("sos-outsider@example.com")
+        group = Group.objects.create(name="SOS Team", created_by=owner)
+        GroupMembership.objects.create(group=group, user=owner)
+        GroupMembership.objects.create(group=group, user=teammate)
+
+        owner_alert = SOSAlert.objects.create(
+            user=owner,
+            group=group,
+            latitude=Decimal("27.700000"),
+            longitude=Decimal("85.300000"),
+        )
+        teammate_alert = SOSAlert.objects.create(
+            user=teammate,
+            group=group,
+            latitude=Decimal("27.710000"),
+            longitude=Decimal("85.310000"),
+        )
+        SOSAlert.objects.create(
+            user=owner,
+            group=group,
+            latitude=Decimal("27.720000"),
+            longitude=Decimal("85.320000"),
+            is_active=False,
+            resolved_at=owner_alert.triggered_at,
+        )
+
+        self._jwt_login(owner.email)
+        response = self.client.get(f"/api/v1/emergency/sos/?group={group.id}")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([item["id"] for item in response.data], [teammate_alert.id, owner_alert.id])
+
+        response_all = self.client.get(f"/api/v1/emergency/sos/?group={group.id}&active=false")
+        self.assertEqual(response_all.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response_all.data), 3)
+
+        self._jwt_login(outsider.email)
+        outsider_response = self.client.get(f"/api/v1/emergency/sos/?group={group.id}")
+        self.assertEqual(outsider_response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_sos_group_members_can_trigger_parallel_alerts(self):
+        owner = self._create_user("parallel-owner@example.com")
+        teammate = self._create_user("parallel-teammate@example.com")
+        group = Group.objects.create(name="Parallel SOS", created_by=owner)
+        GroupMembership.objects.create(group=group, user=owner)
+        GroupMembership.objects.create(group=group, user=teammate)
+
+        self._jwt_login(owner.email)
+        owner_response = self.client.post(
+            "/api/v1/emergency/sos/",
+            {"group": group.id, "latitude": "27.700000", "longitude": "85.300000"},
+            format="json",
+        )
+        self.assertEqual(owner_response.status_code, status.HTTP_201_CREATED)
+
+        self._jwt_login(teammate.email)
+        teammate_response = self.client.post(
+            "/api/v1/emergency/sos/",
+            {"group": group.id, "latitude": "27.710000", "longitude": "85.310000"},
+            format="json",
+        )
+        self.assertEqual(teammate_response.status_code, status.HTTP_201_CREATED)
+
+        self.assertEqual(SOSAlert.objects.filter(group=group, is_active=True).count(), 2)
+
+    def test_sos_only_owner_can_resolve_alert(self):
+        owner = self._create_user("resolve-owner@example.com")
+        teammate = self._create_user("resolve-teammate@example.com")
+        outsider = self._create_user("resolve-outsider@example.com")
+        group = Group.objects.create(name="Owner Resolve", created_by=owner)
+        GroupMembership.objects.create(group=group, user=owner)
+        GroupMembership.objects.create(group=group, user=teammate)
+        alert = SOSAlert.objects.create(
+            user=owner,
+            group=group,
+            latitude=Decimal("27.700000"),
+            longitude=Decimal("85.300000"),
+        )
+
+        self._jwt_login(teammate.email)
+        teammate_response = self.client.patch(
+            f"/api/v1/emergency/sos/{alert.id}/resolve/",
+            format="json",
+        )
+        self.assertEqual(teammate_response.status_code, status.HTTP_403_FORBIDDEN)
+        alert.refresh_from_db()
+        self.assertTrue(alert.is_active)
+
+        self._jwt_login(outsider.email)
+        outsider_response = self.client.patch(
+            f"/api/v1/emergency/sos/{alert.id}/resolve/",
+            format="json",
+        )
+        self.assertEqual(outsider_response.status_code, status.HTTP_403_FORBIDDEN)
+
+        self._jwt_login(owner.email)
+        owner_response = self.client.patch(
+            f"/api/v1/emergency/sos/{alert.id}/resolve/",
+            format="json",
+        )
+        self.assertEqual(owner_response.status_code, status.HTTP_200_OK)
+        alert.refresh_from_db()
+        self.assertFalse(alert.is_active)

@@ -3,6 +3,7 @@ import logging
 from django.utils import timezone
 from groups.models import GroupMembership
 from rest_framework import permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -24,6 +25,34 @@ def fanout_sos_notification(alert) -> None:
 
 class TriggerSOSView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        group_id = request.query_params.get('group')
+        if not group_id:
+            raise ValidationError({'group': ['This query parameter is required.']})
+
+        try:
+            group_id_int = int(group_id)
+        except (TypeError, ValueError):
+            raise ValidationError({'group': ['A valid group id is required.']})
+
+        is_member = GroupMembership.objects.filter(
+            group_id=group_id_int,
+            user=request.user,
+        ).exists()
+        if not is_member:
+            return Response(
+                {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        active_only = request.query_params.get('active', 'true').lower() != 'false'
+        queryset = SOSAlert.objects.filter(group_id=group_id_int)
+        if active_only:
+            queryset = queryset.filter(is_active=True)
+
+        alerts = queryset.order_by('-triggered_at', '-id')
+        return Response(SOSAlertSerializer(alerts, many=True).data, status=status.HTTP_200_OK)
 
     def post(self, request):
         serializer = SOSAlertSerializer(data=request.data, context={'request': request})
@@ -57,6 +86,12 @@ class ResolveSOSView(APIView):
         if not is_member:
             return Response(
                 {'detail': 'You are not a member of this group.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if alert.user_id != request.user.id:
+            return Response(
+                {'detail': 'Only the user who triggered this SOS can resolve it.'},
                 status=status.HTTP_403_FORBIDDEN,
             )
 

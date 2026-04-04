@@ -75,6 +75,7 @@ class GroupMemberSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     first_name = serializers.CharField(source='user.first_name', read_only=True)
     last_name = serializers.CharField(source='user.last_name', read_only=True)
+    phone = serializers.CharField(source='user.phone', read_only=True)
     location = serializers.SerializerMethodField()
     role = serializers.CharField(read_only=True)
 
@@ -85,6 +86,7 @@ class GroupMemberSerializer(serializers.ModelSerializer):
             'email',
             'first_name',
             'last_name',
+            'phone',
             'role',
             'joined_at',
             'location',
