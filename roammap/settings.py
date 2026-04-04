@@ -81,6 +81,7 @@ INSTALLED_APPS = [
     'channels',
     'chat',
     'users',
+    'checklist',
     'groups',
     'routes',
     'emergency',

@@ -26,6 +26,7 @@ urlpatterns = [
     path('api/v1/connections/', include('users.connection_urls')),
     path('api/v1/messages/', include('chat.urls')),
     path('api/v1/users/', include('users.urls')),
+    path('api/v1/checklist/', include('checklist.urls')),
     path('api/v1/groups/', include('groups.urls')),
     path('api/v1/', include('routes.group_urls')),
     path('api/v1/routes/', include('routes.urls')),
